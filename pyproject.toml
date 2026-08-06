@@ -14,3 +14,4 @@ Repository = "https://github.com/bandifiu/ComfyUI-NN-custom-nodes"
 [tool.comfy]
 PublisherId = "bandifiu"
 DisplayName = "NN-custom-nodes"
+Icon = "https://raw.githubusercontent.com/bandifiu//ComfyUI-NN-custom-nodes/main/assets/icon.png"
