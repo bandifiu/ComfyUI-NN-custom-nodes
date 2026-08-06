@@ -1,0 +1,4 @@
+torch
+numpy
+pillow
+tomli; python_version < "3.11"

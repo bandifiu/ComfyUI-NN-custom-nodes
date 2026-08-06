@@ -1,0 +1,16 @@
+[project]
+name = "nn-custom-nodes"
+description = "A collection of utility nodes for ComfyUI workflows."
+
+version = "1.1.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+dependencies = ["numpy", "pillow", "torch", "tomli; python_version < '3.11'"]
+
+[project.urls]
+Repository = "https://github.com/bandifiu/ComfyUI-NN-custom-nodes"
+
+[tool.comfy]
+PublisherId = "bandifiu"
+DisplayName = "NN-custom-nodes"

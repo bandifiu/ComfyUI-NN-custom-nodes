@@ -1,0 +1,39 @@
+[wildcards]
+
+# Directory containing wildcard text files
+path = "wildcards"
+
+# Cache loaded wildcard files
+# Disable to reload wildcard files without restarting ComfyUI
+cache = true
+
+# Remove LoRA tags from processed prompts
+cleanup = true
+
+# Separator used when selecting multiple wildcard options
+delimiter = ", "
+
+# Maximum recursive expansion passes
+max_iterations = 5
+
+[profiler]
+
+# Enable execution profiler
+enable = true
+
+# Print execution times to console
+console_log = false
+
+# Minimum execution time before logging
+console_log_threshold = 0
+
+# Decimal precision for displayed times
+precision = 2
+
+# Time threshold for slow node highlighting
+slow_time = 10
+
+# Frontend colors
+active_color = "#4fc3f7"
+badge_color = "#1e7832"
+badge_color_slow = "#962828"
