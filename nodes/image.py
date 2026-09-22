@@ -28,12 +28,28 @@ def prepare_tensor(image):
     
     return image
 
+def split_rgb_alpha(image):
+    if image.shape[-1] == 4:
+        return image[..., :3], image[..., 3:4]
+    return image, None
+
+
+def merge_rgb_alpha(rgb, alpha):
+    if alpha is not None:
+        return torch.cat([rgb, alpha], dim=-1)
+    return rgb
+
 def adjust_color_channels(img_tensor, red=0, green=0, blue=0):     
     gains = torch.tensor(
         [1 + red, 1 + green, 1 + blue],
         device=img_tensor.device,
         dtype=img_tensor.dtype
     )
+
+    if img_tensor.shape[-1] == 4:
+        rgb = img_tensor[..., :3] * gains
+        alpha = img_tensor[..., 3:4]
+        return torch.cat([rgb, alpha], dim=-1)
 
     return img_tensor * gains
 
@@ -51,11 +67,15 @@ def adjust_contrast(img, contrast=0):
     mean_luma = luma.mean(dim=(1, 2), keepdim=True)
     factor = 1 + contrast
 
-    img = (img - mean_luma.unsqueeze(-1)) * factor + mean_luma.unsqueeze(-1)
+    rgb, alpha = split_rgb_alpha(img)
+    rgb = (rgb - mean_luma.unsqueeze(-1)) * factor + mean_luma.unsqueeze(-1)
 
-    return img
+    if alpha is not None:        
+        return torch.cat([rgb, alpha], dim=-1)    
 
-def adjust_saturation(img_tensor, saturation=1.0):
+    return rgb
+
+def adjust_saturation(img, saturation=1.0):
     """
     img_tensor: (B, H, W, 3), values in [0,1]
     saturation:
@@ -64,16 +84,20 @@ def adjust_saturation(img_tensor, saturation=1.0):
         >1.0 = increase saturation
     """
 
-    # Luminance using sRGB coefficients
+    rgb, alpha = split_rgb_alpha(img)    
+
     luma = (
-        0.2126 * img_tensor[..., 0] +
-        0.7152 * img_tensor[..., 1] +
-        0.0722 * img_tensor[..., 2]
+        0.2126 * rgb[..., 0] +
+        0.7152 * rgb[..., 1] +
+        0.0722 * rgb[..., 2]
     ).unsqueeze(-1)
 
-    img = luma + saturation * (img_tensor - luma)
+    rgb = luma + saturation * (rgb - luma)
 
-    return img
+    if alpha is not None:        
+        return torch.cat([rgb, alpha], dim=-1)
+
+    return rgb
 
 def adjust_contrast_ref(images, ref_image, multiplier=1.0):
     """
@@ -90,9 +114,11 @@ def adjust_contrast_ref(images, ref_image, multiplier=1.0):
     # RGB → luminance weights (ITU-R BT.709)
     weights = torch.tensor([0.2126, 0.7152, 0.0722], device=image.device)
 
-    # Compute luminance
-    image_lum = torch.sum(image * weights, dim=-1, keepdim=True)
-    ref_lum = torch.sum(ref_image * weights, dim=-1, keepdim=True)
+    image_rgb = image[..., :3]
+    ref_rgb = ref_image[..., :3]
+
+    image_lum = torch.sum(image_rgb * weights, dim=-1, keepdim=True)
+    ref_lum = torch.sum(ref_rgb * weights, dim=-1, keepdim=True)
 
     # Luminance statistics
     image_mean = image_lum.mean()
@@ -129,8 +155,8 @@ def adjust_contrast_ref_batch(images, ref_images, multiplier=1.0):
     )
 
     # Luminance (B, H, W, 1)
-    image_lum = (images * weights).sum(dim=-1, keepdim=True)
-    ref_lum = (ref_images * weights).sum(dim=-1, keepdim=True)
+    image_lum = (images[..., :3] * weights).sum(dim=-1, keepdim=True)
+    ref_lum = (ref_images[..., :3] * weights).sum(dim=-1, keepdim=True)
 
     # Per-image statistics
     image_mean = image_lum.mean(dim=(1, 2, 3), keepdim=True)
@@ -181,20 +207,33 @@ def process_chunks(image, chunk_size, device, output_shape=None, process_func=No
 
 def extend_range_per_channel(img, min_vals=(16,16,16), max_vals=(235,235,235)):
 
-    min_vals_tensor = torch.tensor(min_vals, dtype=torch.float32)
-    max_vals_tensor = torch.tensor(max_vals, dtype=torch.float32)
+    rgb, alpha = split_rgb_alpha(img)       
+
+    min_vals_tensor = torch.tensor(
+        min_vals, device=img.device, dtype=img.dtype
+    )
+    max_vals_tensor = torch.tensor(
+        max_vals, device=img.device, dtype=img.dtype
+    )
 
     if torch.any(min_vals_tensor >= max_vals_tensor):
-        raise ValueError(f"All min_vals must be < max_vals. Got min={min_vals}, max={max_vals}")
+        raise ValueError(
+            f"All min_vals must be < max_vals. "
+            f"Got min={min_vals}, max={max_vals}"
+        )
 
-    mins = torch.tensor(min_vals, device=img.device, dtype=img.dtype) / 255.0
-    maxs = torch.tensor(max_vals, device=img.device, dtype=img.dtype) / 255.0
+    mins = min_vals_tensor / 255.0
+    maxs = max_vals_tensor / 255.0
 
     scale = 1.0 / (maxs - mins)
 
-    img = (img - mins) * scale
+    rgb = (rgb - mins) * scale
+    rgb = torch.clamp(rgb, 0.0, 1.0)
 
-    return torch.clamp(img, 0.0, 1.0)
+    if alpha is not None:       
+        return torch.cat([rgb, alpha], dim=-1)
+
+    return rgb
 
 def extend_range(img, min_val=16, max_val=235):    
     return extend_range_per_channel(
@@ -240,9 +279,12 @@ class ImageCASharpening(io.ComfyNode):
         return io.NodeOutput(output)  
     
     @classmethod
-    def cas(cls, image, amount):       
+    def cas(cls, image, amount): 
+
+        rgb, alpha = split_rgb_alpha(image)                   
+          
         epsilon = 1e-5
-        img = F.pad(image.permute([0, 3, 1, 2]), pad=(1, 1, 1, 1))
+        img = F.pad(rgb.permute([0, 3, 1, 2]), pad=(1, 1, 1, 1))
         a = img[..., :-2, :-2]
         b = img[..., :-2, 1:-1]
         c = img[..., :-2, 2:]
@@ -275,6 +317,9 @@ class ImageCASharpening(io.ComfyNode):
 
         del a, b, c, d, e, f, g, h, i
 
+        if alpha is not None:
+            return torch.cat([output, alpha], dim=-1) 
+        
         return output
     
 class ImageInsetCropPercent(io.ComfyNode):
