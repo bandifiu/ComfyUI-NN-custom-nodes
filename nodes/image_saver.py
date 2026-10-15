@@ -125,7 +125,7 @@ def save_single_image(image, filepath, format, metadata, quality=90, lossless=Fa
         save_args = {
             "format": "WEBP",
             "quality": quality,
-            "method": 6,
+            "method": 4,
             "lossless": lossless
         }
 
