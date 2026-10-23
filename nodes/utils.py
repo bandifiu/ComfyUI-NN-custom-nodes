@@ -26,17 +26,18 @@ def get_node_category(group: str | None = None, sub_group: str | None = None) ->
 class SoftClearCache(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
+        template = io.MatchType.Template("SoftClearCache")
         return io.Schema(
             node_id=get_node_id("SoftClearCache"),
             display_name="Soft Clear Cache",
             category=get_node_category("util"),
             inputs=[    
-                io.AnyType.Input("any"),
+                io.MatchType.Input("any", template=template),
                 io.Boolean.Input("unload_models", default=True),        
                 io.Boolean.Input("clear_cache", default=True),            
             ],
             outputs=[
-                io.AnyType.Output(display_name="any"),
+                io.MatchType.Output(display_name="any", template=template),
             ],
         )  
     @classmethod    
@@ -77,15 +78,16 @@ class ImageOptimize(io.ComfyNode):
 class InputCheck(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
+        template = io.MatchType.Template("InputCheck")
         return io.Schema(
             node_id=get_node_id("InputCheck"),
             display_name="InputCheck",
             category=get_node_category("util"),
             inputs=[    
-                io.AnyType.Input("any", optional=True),        
+                io.MatchType.Input("any", optional=True, template=template),        
             ],
             outputs=[
-                io.AnyType.Output(display_name="any"),
+                io.MatchType.Output(display_name="any", template=template),
                 io.Boolean.Output(display_name="is_none"),
             ],
         )  
@@ -97,17 +99,18 @@ class InputCheck(io.ComfyNode):
 class AnySwitch(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
+        template = io.MatchType.Template("AnySwitch")
         return io.Schema(
             node_id=get_node_id("AnyBoolSwitchTyped"),
             display_name="Bool Switch",
             category=get_node_category("util"),
             inputs=[    
-                io.AnyType.Input("any_true", lazy=True),        
-                io.AnyType.Input("any_false", lazy=True),        
+                io.MatchType.Input("any_true", lazy=True, template=template),        
+                io.MatchType.Input("any_false", lazy=True, template=template),        
                 io.Boolean.Input("select", default=True),     
             ],
             outputs=[
-                io.AnyType.Output(display_name="any"),
+                io.MatchType.Output(display_name="any", template=template),
             ],
         )    
 
