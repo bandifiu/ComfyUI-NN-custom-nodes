@@ -14,7 +14,8 @@ from .nodes.image import (
     ImageGrid,
     ImageColorRange,
     VideoTimeline,
-    ImageResizeBatch
+    ImageResizeBatch,
+    ImageAlphaTransparency
 )
 from .nodes.utils import SoftClearCache, ImageOptimize, AnySwitch, InputCheck
 from .nodes.wildcards import WildcardProcessor
@@ -40,6 +41,7 @@ class NNCustomNodesExtension(ComfyExtension):
             ImageGrid,
             ImageColorRange,
             VideoTimeline,
+            ImageAlphaTransparency,
 
             SoftClearCache, 
             ImageOptimize, 

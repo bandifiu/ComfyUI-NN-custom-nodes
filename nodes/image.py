@@ -68,12 +68,9 @@ def adjust_contrast(img, contrast=0):
     factor = 1 + contrast
 
     rgb, alpha = split_rgb_alpha(img)
-    rgb = (rgb - mean_luma.unsqueeze(-1)) * factor + mean_luma.unsqueeze(-1)
+    rgb = (rgb - mean_luma.unsqueeze(-1)) * factor + mean_luma.unsqueeze(-1)    
 
-    if alpha is not None:        
-        return torch.cat([rgb, alpha], dim=-1)    
-
-    return rgb
+    return merge_rgb_alpha(rgb, alpha)
 
 def adjust_saturation(img, saturation=1.0):
     """
@@ -92,12 +89,9 @@ def adjust_saturation(img, saturation=1.0):
         0.0722 * rgb[..., 2]
     ).unsqueeze(-1)
 
-    rgb = luma + saturation * (rgb - luma)
+    rgb = luma + saturation * (rgb - luma)   
 
-    if alpha is not None:        
-        return torch.cat([rgb, alpha], dim=-1)
-
-    return rgb
+    return merge_rgb_alpha(rgb, alpha)
 
 def adjust_contrast_ref(images, ref_image, multiplier=1.0):
     """
@@ -229,11 +223,8 @@ def extend_range_per_channel(img, min_vals=(16,16,16), max_vals=(235,235,235)):
 
     rgb = (rgb - mins) * scale
     rgb = torch.clamp(rgb, 0.0, 1.0)
-
-    if alpha is not None:       
-        return torch.cat([rgb, alpha], dim=-1)
-
-    return rgb
+  
+    return merge_rgb_alpha(rgb, alpha)
 
 def extend_range(img, min_val=16, max_val=235):    
     return extend_range_per_channel(
@@ -241,6 +232,84 @@ def extend_range(img, min_val=16, max_val=235):
         min_vals=(min_val,)*3,
         max_vals=(max_val,)*3
     )
+
+def alpha_from_content(
+    img,
+    min_val=0,
+    max_val=255,
+    min_bias=0,
+    max_bias=0,
+):
+    """
+    Generate alpha from pixel brightness with configurable transitions.
+
+    min_val: Black-removal threshold (0 disables it).
+    max_val: White-removal threshold (255 disables it).
+    min_bias: Transition width above min_val.
+    max_bias: Transition width below max_val.
+
+    Existing alpha is preserved.
+    Assumes RGB and alpha are normalized to [0, 1].
+    """
+    rgb, alpha = split_rgb_alpha(img)
+
+    if not 0 <= min_val <= 255:
+        raise ValueError("min_val must be between 0 and 255")
+    if not 0 <= max_val <= 255:
+        raise ValueError("max_val must be between 0 and 255")
+    if min_val >= max_val:
+        raise ValueError("min_val must be less than max_val")
+    if min_bias < 0 or max_bias < 0:
+        raise ValueError("Bias values must be non-negative")
+    if min_bias > 255 - min_val:
+        raise ValueError("min_bias extends beyond 255")
+    if max_bias > max_val:
+        raise ValueError("max_bias extends below 0")
+    if min_val + min_bias > max_val - max_bias:
+        raise ValueError("Transition regions must not overlap")
+
+    # Perceptual brightness, normalized to [0, 1].
+    brightness = (
+        0.2126 * rgb[..., 0:1]
+        + 0.7152 * rgb[..., 1:2]
+        + 0.0722 * rgb[..., 2:3]
+    )
+
+    value = brightness * 255.0
+
+    # Start fully opaque.
+    mask = torch.ones_like(value)
+
+    # Black-side transition: transparent -> opaque.
+    if min_val > 0:
+        if min_bias > 0:
+            min_mask = (
+                (value - min_val) / min_bias
+            ).clamp(0.0, 1.0)
+        else:
+            min_mask = (value >= min_val).to(img.dtype)
+
+        mask = mask * min_mask
+
+    # White-side transition: opaque -> transparent.
+    if max_val < 255:
+        if max_bias > 0:
+            max_mask = (
+                (max_val - value) / max_bias
+            ).clamp(0.0, 1.0)
+        else:
+            max_mask = (value <= max_val).to(img.dtype)
+
+        mask = mask * max_mask
+
+    # Preserve any existing alpha channel.
+    if alpha is not None:
+        alpha = alpha * mask
+    else:
+        alpha = mask
+
+    return merge_rgb_alpha(rgb, alpha)
+
 
 # From https://github.com/cubiq/ComfyUI_essentials/blob/main/image.py
 class ImageCASharpening(io.ComfyNode):
@@ -316,11 +385,8 @@ class ImageCASharpening(io.ComfyNode):
         output = output.permute([0, 2, 3, 1])
 
         del a, b, c, d, e, f, g, h, i
-
-        if alpha is not None:
-            return torch.cat([output, alpha], dim=-1) 
         
-        return output
+        return merge_rgb_alpha(output, alpha)
     
 class ImageInsetCropPercent(io.ComfyNode):
     """Image Inset Crop, with percentages."""
@@ -909,6 +975,34 @@ class ImageResizeBatch(io.ComfyNode):
 
         return result
 
+class ImageAlphaTransparency(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=get_node_id("ImageAlphaTransparency"),
+            display_name="Image Alpha Transparency",
+            category=get_node_category("image"),
+            inputs=[    
+                io.Image.Input("image"),        
+                io.Int.Input("min", default=0, min=0, max=255, step=1, display_mode=io.NumberDisplay.number),
+                io.Int.Input("max", default=255, min=0, max=255, step=1, display_mode=io.NumberDisplay.number),  
+                io.Int.Input("min_bias", default=0, min=0, max=255, step=1, display_mode=io.NumberDisplay.number),                
+                io.Int.Input("max_bias", default=0, min=0, max=255, step=1, display_mode=io.NumberDisplay.number),                
+
+            ],
+            outputs=[
+                io.Image.Output(display_name="image"),
+            ],
+        )  
+
+    @classmethod
+    def execute(cls, image, min, max, min_bias, max_bias):            
+        if min > 0 or max < 255:                  
+            result_image = alpha_from_content(image, min_val=min, max_val=max, min_bias=min_bias, max_bias=max_bias)
+
+            return io.NodeOutput(result_image)
+           
+        return io.NodeOutput(image)
 
 
     
